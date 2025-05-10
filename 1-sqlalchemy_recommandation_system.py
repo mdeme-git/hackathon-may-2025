@@ -56,7 +56,8 @@ def setup(RUN_SETUP: bool = False):
     POSTGRES_USERNAME = os.environ["POSTGRES_USERNAME"]
     POSTGRES_DATABASE = os.environ["POSTGRES_DATABASE"]
 
-    if POSTGRES_HOST.endswith(".database.azure.com"):
+    #if POSTGRES_HOST.endswith(".database.azure.com"):
+    if POSTGRES_HOST.endswith("NeverProcessThisStatementForNow"):
         print("Authenticating to Azure Database for PostgreSQL using Azure Identity...")
         azure_credential = DefaultAzureCredential()
         token = azure_credential.get_token("https://ossrdbms-aad.database.windows.net/.default")
@@ -78,11 +79,13 @@ def setup(RUN_SETUP: bool = False):
     if RUN_SETUP:
         with engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            conn.execute(text("CREATE EXTENSION IF NOT EXISTS azure_ai"))
+            #conn.execute(text("CREATE EXTENSION IF NOT EXISTS azure_ai"))
             conn.execute(text(sql_index))
+            """
             conn.execute(text(f"select azure_ai.set_setting('azure_openai.endpoint','{os.environ.get("SQL_AZURE_OPENAI_ENDPOINT")}');"))
             conn.execute(text(f"select azure_ai.set_setting('azure_openai.subscription_key', '{os.environ.get("SQL_AZURE_OPENAI_KEY")}');"))
-        
+            """
+
         # Drop all tables (and indexes) defined in this model from the database, if they already exist
         Base.metadata.drop_all(engine)
         # Create all tables (and indexes) defined for this model in the database
@@ -93,11 +96,18 @@ def setup(RUN_SETUP: bool = False):
 
 def main():
     RUN_SETUP = False
+    DELETE_ALL = False
     print("Starting the SQLAlchemy recommendation system...")
     engine = setup(RUN_SETUP)
     print("Database setup complete.")
     # Insert data and issue queries
     with Session(engine) as session:
+        if DELETE_ALL:
+            #Delete all data in the table
+            session.execute(text("DELETE FROM recipes;"))
+            session.commit()
+            print("All data deleted.")
+
         if RUN_SETUP:
             #Delete all data in the table
             session.execute(text("DELETE FROM recipes;"))
@@ -166,22 +176,26 @@ def main():
     # Query for target Recipe, the one whose title matches "Winnie the Pooh"
     query = select(Recipes).where(Recipes.recipe_name == "Apple Pie by Grandma Ople")
     target_recipe = session.execute(query).scalars().first()
+  
     if target_recipe is None:
         print("Receipe not found")
         exit(1)
+    else:
+        print(f"Target recipe: {target_recipe.recipe_name} with id {target_recipe.rid}")
 
-    # Find the 5 most similar Recipes to "Winnie the Pooh"
-    most_similars = session.execute(text("""SELECT  * 
-                                         FROM recipes 
-                                         WHERE recipe_vector IS NOT NULL 
-                                            AND rid != :rid ORDER BY recipe_vector <=> :recipe_vector LIMIT 5"""
-                                         ), 
-                                    {"rid": target_recipe.rid, "recipe_vector": json.dumps(target_recipe.recipe_vector.tolist())}).all()
-    
-    
-    print(f"Five most similar recipes to '{target_recipe.recipe_name}':")
-    for Recipe in most_similars:
-        print(f"\t{Recipe.recipe_name}\t{Recipe.prep_time}")
+    if RUN_EMBEDDINGS:
+        # Find the 5 most similar Recipes to "Winnie the Pooh"
+        most_similars = session.execute(text("""SELECT  * 
+                                            FROM recipes 
+                                            WHERE recipe_vector IS NOT NULL 
+                                                AND rid != :rid ORDER BY recipe_vector <=> :recipe_vector LIMIT 5"""
+                                            ), 
+                                        {"rid": target_recipe.rid, "recipe_vector": json.dumps(target_recipe.recipe_vector.tolist())}).all()
+        
+        
+        print(f"Five most similar recipes to '{target_recipe.recipe_name}':")
+        for Recipe in most_similars:
+            print(f"\t{Recipe.recipe_name}\t{Recipe.prep_time}")
 
 #Run script
 if __name__ == "__main__":
